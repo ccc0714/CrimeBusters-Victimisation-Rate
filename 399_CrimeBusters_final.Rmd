@@ -1,0 +1,186 @@
+---
+title: "CrimeBusters: Victimisation Rates in New Zealand"
+author: "Kaka-C"
+output: html_document
+---
+
+Victimisation rates by age and sex for three crime types (assault, sexual
+offences and theft from a person), using NZ Police unique-victim data for the
+12-month periods ending June 2024, 2025 and 2026, and the Stats NZ mean
+estimated resident population for the same years. See the technical supplement
+for data sources and assumptions.
+
+Required files in the working directory:
+
+- `Data_Jun2024.csv`, `Data_Jun2025.csv`, `Data_Jun2026.csv` (NZ Police, "Age Sex ROV" dataset)
+- `Population_data.csv` (Stats NZ, cleaned to columns `Year`, `Sex`, `Age`, `Population`)
+
+```{r setup, message = FALSE}
+library(tidyverse)
+```
+
+## Clean the victim data
+
+```{r}
+victim_raw <- paste0("Data_Jun", 2024:2026, ".csv") |>
+  lapply(read.csv) |>
+  bind_rows()
+
+victims <- victim_raw |>
+  mutate(
+    # Year in which the 12-month period ends (e.g. "6/1/2024" -> 2024)
+    Year = year(mdy(Year.Month)),
+    Crime = case_when(
+      ANZSOC.Division == "Assault" ~ "Assault",
+      ANZSOC.Division == "Sexual Offences" ~ "Sexual Offences",
+      ANZSOC.Group == "Theft from a person" ~ "Theft from person"
+    )) |>
+  filter(
+    !is.na(Crime),
+    SEX %in% c("Female", "Male"),
+    !Age.Group.5Yr.Band %in% c("Not Applicable", "Not Specified")
+  ) |>
+  mutate(
+    # Match the Stats NZ age labels, e.g. "0 - 4 years inclusive" -> "0-4 Years"
+    Age = str_replace(Age.Group.5Yr.Band,
+                      "^(\\d+) - (\\d+) years inclusive$", "\\1-\\2 Years")
+  ) |>
+  group_by(Year, Sex = SEX, Age, Crime) |>
+  summarise(Victims = sum(Victim.Count), .groups = "drop")
+```
+
+## Clean the population data
+
+```{r}
+# Police data tops out at "80 years or over", so combine the oldest Stats NZ bands
+population <- read.csv("Population_data.csv") |>
+  mutate(Age = if_else(Age %in% c("80-84 Years", "85-89 Years"),
+                       "80 years or over", Age)) |>
+  group_by(Year, Sex, Age) |>
+  summarise(Population = sum(Population), .groups = "drop")
+```
+
+## Join victims onto the population
+
+Each crime type is left joined onto the population by year, sex and age.
+Groups with no recorded victims have no match, so their victim count is set to 0.
+
+```{r}
+crimes <- c("Assault", "Sexual Offences", "Theft from person")
+
+merged <- lapply(crimes, function(crime) {
+  population |>
+    left_join(
+      victims |> filter(Crime == crime) |> select(-Crime),
+      by = c("Year", "Sex", "Age")
+    ) |>
+    mutate(Victims = replace_na(Victims, 0))
+})
+names(merged) <- crimes
+```
+
+## Victimisation rates
+
+Victim counts and population are summed over the three years (and over sex for
+the age-only rates) before dividing, rather than averaging the yearly rates.
+
+```{r}
+victimisation_rate <- function(data, group_vars) {
+  data |>
+    group_by(across(all_of(group_vars))) |>
+    summarise(Victims = sum(Victims), Population = sum(Population),
+              .groups = "drop") |>
+    mutate(
+      Rate = Victims / Population * 100,
+      Age = fct_reorder(Age, parse_number(Age))
+    )
+}
+
+rates_age <- lapply(merged, victimisation_rate, group_vars = "Age")
+rates_age_sex <- lapply(merged, victimisation_rate, group_vars = c("Age", "Sex"))
+
+rates_age
+rates_age_sex
+```
+
+## Plots
+
+```{r}
+plot_rate <- function(rates, title, by_sex = FALSE) {
+  p <- if (by_sex) {
+    ggplot(rates, aes(x = Age, y = Rate, fill = Sex)) +
+      geom_col(color = "black", position = "dodge")
+  } else {
+    ggplot(rates, aes(x = Age, y = Rate)) +
+      geom_col(color = "black", fill = "lightgray")
+  }
+
+  p +
+    labs(
+      title = title,
+      subtitle = "Average Annual Rate based on 2024-2026 data",
+      x = "Age Group",
+      y = "Victimisation Rate (%)",
+      fill = "Sex"
+    ) +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+```
+
+### Plot 1: Assault by age group
+
+```{r}
+plot1_assault_age <- plot_rate(rates_age$Assault,
+                               "Assault Victimisation Rate in NZ")
+plot1_assault_age
+ggsave("plot1_assault_age.png", plot1_assault_age, width = 8, height = 6)
+```
+
+### Plot 2: Assault by age group and sex
+
+```{r}
+plot2_assault_age_sex <- plot_rate(rates_age_sex$Assault,
+                                   "Assault Victimisation Rate in NZ by Age and Sex",
+                                   by_sex = TRUE)
+plot2_assault_age_sex
+ggsave("plot2_assault_age_sex.png", plot2_assault_age_sex, width = 8, height = 6)
+```
+
+### Plot 3: Sexual offences by age group
+
+```{r}
+plot3_sexoff_age <- plot_rate(rates_age$`Sexual Offences`,
+                              "Sexual Offences Victimisation Rate in NZ")
+plot3_sexoff_age
+ggsave("plot3_sexoff_age.png", plot3_sexoff_age, width = 8, height = 6)
+```
+
+### Plot 4: Sexual offences by age group and sex
+
+```{r}
+plot4_sexoff_age_sex <- plot_rate(rates_age_sex$`Sexual Offences`,
+                                  "Sexual Offences Victimisation Rate in NZ by Age and Sex",
+                                  by_sex = TRUE)
+plot4_sexoff_age_sex
+ggsave("plot4_sexoff_age_sex.png", plot4_sexoff_age_sex, width = 8, height = 6)
+```
+
+### Plot 5: Theft from a person by age group
+
+```{r}
+plot5_theft_age <- plot_rate(rates_age$`Theft from person`,
+                             "Theft from a Person Victimisation Rate in NZ")
+plot5_theft_age
+ggsave("plot5_theft_age.png", plot5_theft_age, width = 8, height = 6)
+```
+
+### Plot 6: Theft from a person by age group and sex
+
+```{r}
+plot6_theft_age_sex <- plot_rate(rates_age_sex$`Theft from person`,
+                                 "Theft from a Person Victimisation Rate in NZ by Age and Sex",
+                                 by_sex = TRUE)
+plot6_theft_age_sex
+ggsave("plot6_theft_age_sex.png", plot6_theft_age_sex, width = 8, height = 6)
+```
