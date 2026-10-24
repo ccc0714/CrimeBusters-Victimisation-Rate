@@ -15,6 +15,10 @@ Required files in the working directory:
 - `Data_Jun2024.csv`, `Data_Jun2025.csv`, `Data_Jun2026.csv` (NZ Police, "Age Sex ROV" dataset)
 - `Population_data.csv` (Stats NZ, cleaned to columns `Year`, `Sex`, `Age`, `Population`)
 
+Instructions on outputting to HTML:
+
+Click the Knit icon (marked with a blue ball of yarn) on the RStudio script editor toolbar, or use the shortcut Ctrl + Shift + K (Windows/Linux) or Cmd + Shift + K (Mac)
+
 ```{r setup, message = FALSE}
 library(tidyverse)
 ```
